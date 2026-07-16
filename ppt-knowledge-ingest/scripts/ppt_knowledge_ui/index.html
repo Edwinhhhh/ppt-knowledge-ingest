@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PPT Knowledge Workbench</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-pill">
+        <span class="brand-logo">PK</span>
+        <div>
+          <h1>PPT Knowledge Workbench</h1>
+          <p>本地 PPT 知识库归档与检索工作台</p>
+        </div>
+      </div>
+      <button id="refreshBtn" class="round-action" title="刷新知识库">↻</button>
+    </header>
+
+    <section class="hero-card">
+      <div class="hero-copy">
+        <span class="mini-label">Local AI Archive</span>
+        <h2>把散落在电脑里的 PPT，变成可浏览、可追溯、可检索的 AI 知识资产。</h2>
+        <p>扫描文件夹、生成 Markdown / JSON / RAG chunks，并为每份 deck 保留原版式 HTML 视觉预览。</p>
+        <div class="hero-actions">
+          <button id="scanBtn" class="primary">扫描文件夹</button>
+          <button id="convertBtn" class="secondary">开始转换</button>
+        </div>
+      </div>
+      <div class="hero-visual" aria-hidden="true">
+        <div class="deck-sheet sheet-a"></div>
+        <div class="deck-sheet sheet-b"></div>
+        <div class="flow-ribbon"></div>
+        <div class="visual-chip chip-one">Markdown</div>
+        <div class="visual-chip chip-two">JSONL</div>
+        <div class="visual-chip chip-three">Visual HTML</div>
+      </div>
+    </section>
+
+    <nav class="module-nav" aria-label="主要模块">
+      <button class="nav active" data-view="import">
+        <span>01</span>
+        <strong>导入转换</strong>
+        <small>选择本地文件夹，配置输出层级</small>
+      </button>
+      <button class="nav" data-view="library">
+        <span>02</span>
+        <strong>知识库</strong>
+        <small>查看状态、资产、失败队列</small>
+      </button>
+      <button class="nav" data-view="deck">
+        <span>03</span>
+        <strong>Deck 详情</strong>
+        <small>预览原版式 HTML 与结构化结果</small>
+      </button>
+    </nav>
+
+    <aside class="task-card">
+      <span>Task Status</span>
+      <strong id="taskStatus">Ready</strong>
+      <p id="taskHint">等待下一步操作</p>
+      <div class="progress-box">
+        <div class="progress-meta">
+          <small id="progressLabel">尚未开始</small>
+          <b id="progressPercent">0%</b>
+        </div>
+        <div class="progress-track">
+          <i id="progressFill"></i>
+        </div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <section id="view-import" class="view active">
+        <div class="section-head">
+          <span class="mini-label">项目介绍</span>
+          <h3>先确认来源，再选择生成哪些资产。</h3>
+          <p>批量归档建议只生成“原版式 HTML”，不生成 standalone，以免图片被内嵌进单个大文件。</p>
+        </div>
+
+        <div class="action-grid">
+          <section class="glass-panel source-panel">
+            <div class="panel-title">
+              <span>01</span>
+              <div>
+                <h4>来源与输出</h4>
+                <p>定义要扫描的位置，以及知识库落盘目录。</p>
+              </div>
+            </div>
+            <div class="form-grid">
+              <div class="source-switch" aria-label="选择导入方式">
+                <button type="button" class="source-mode active" data-source="folder">文件夹批量</button>
+                <button type="button" class="source-mode" data-source="file">单个 PPT</button>
+                <button type="button" class="source-mode" data-source="online">在线链接</button>
+              </div>
+              <label>
+                <span id="sourceLabel">PPT 文件夹</span>
+                <div class="path-row">
+                  <input id="libraryRoot" value="/Users/bytedance/Downloads" spellcheck="false">
+                  <button type="button" id="browseSourceBtn" class="path-button">选择</button>
+                </div>
+              </label>
+              <label>
+                输出知识库目录
+                <div class="path-row">
+                  <input id="outputRoot" value="/Users/bytedance/Documents/Codex/2026-06-21/ni/outputs/ppt-knowledge-library" spellcheck="false">
+                  <button type="button" id="browseOutputBtn" class="path-button">选择</button>
+                </div>
+              </label>
+              <label>
+                排除规则
+                <input id="exclude" value="~$* , *备份*" spellcheck="false">
+              </label>
+            </div>
+          </section>
+
+          <section class="glass-panel output-panel">
+            <div class="panel-title">
+              <span>02</span>
+              <div>
+                <h4>输出层级</h4>
+                <p>选择给人读、给 AI 检索、给视觉复核的文件。</p>
+              </div>
+            </div>
+            <div class="option-stack">
+              <label class="choice recommended">
+                <input type="checkbox" id="renderedHtml">
+                <span>
+                  <strong>原版式 HTML</strong>
+                  <small>推荐：保留 PPT 视觉版，引用 assets/rendered_slides。</small>
+                </span>
+              </label>
+              <label class="choice">
+                <input type="checkbox" id="renderedStandalone">
+                <span>
+                  <strong>单文件原版式 HTML</strong>
+                  <small>仅适合分享单份 deck；批量归档不建议。</small>
+                </span>
+              </label>
+              <label class="choice">
+                <input type="checkbox" id="standaloneHtml">
+                <span>
+                  <strong>单文件知识 HTML</strong>
+                  <small>结构化阅读版单文件，不等同原 PPT 视觉版。</small>
+                </span>
+              </label>
+            </div>
+            <div class="runbar">
+              <button id="scanBtnSecondary" class="secondary">仅扫描</button>
+              <button id="convertBtnSecondary" class="primary">开始转换</button>
+            </div>
+          </section>
+        </div>
+
+        <section class="glass-panel log-panel">
+          <div class="panel-title compact">
+            <span>03</span>
+            <div>
+              <h4>运行日志</h4>
+              <p>扫描、转换和失败原因会显示在这里。</p>
+            </div>
+          </div>
+          <pre id="log"></pre>
+        </section>
+      </section>
+
+      <section id="view-library" class="view">
+        <div class="section-head">
+          <span class="mini-label">知识库</span>
+          <h3>所有 deck 的处理状态集中在这里。</h3>
+          <p id="librarySummary">尚未加载</p>
+        </div>
+
+        <div class="stats-grid" id="statsGrid">
+          <article><span>Total</span><strong>-</strong><small>PPT files</small></article>
+          <article><span>Rendered</span><strong>-</strong><small>visual HTML</small></article>
+          <article><span>Chunks</span><strong>-</strong><small>retrieval rows</small></article>
+          <article><span>Failed</span><strong>-</strong><small>needs review</small></article>
+        </div>
+
+        <div class="library-tools">
+          <input id="search" placeholder="搜索标题、文件名、来源路径或状态">
+          <div class="library-controls">
+            <label class="sort-select">
+              排序
+              <select id="sortKey">
+                <option value="imported_at">导入时间</option>
+                <option value="title">Deck 名称</option>
+                <option value="status">状态</option>
+                <option value="slide_count">页数</option>
+                <option value="has_rendered_html">视觉版</option>
+                <option value="has_chunks">Chunks</option>
+              </select>
+            </label>
+            <button type="button" id="sortDir" class="sort-dir" title="切换排序方向">新到旧</button>
+            <div class="legend">
+              <span><i class="dot ok"></i> 已入库</span>
+              <span><i class="dot visual"></i> 有视觉版</span>
+              <span><i class="dot warn"></i> 需处理</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><button type="button" class="th-sort" data-sort="status">状态</button></th>
+                <th><button type="button" class="th-sort" data-sort="title">Deck / Source</button></th>
+                <th><button type="button" class="th-sort" data-sort="has_rendered_html">资产</button></th>
+                <th><button type="button" class="th-sort" data-sort="imported_at">导入时间</button></th>
+                <th><button type="button" class="th-sort" data-sort="slide_count">页数</button></th>
+                <th><button type="button" class="th-sort" data-sort="sha256">SHA</button></th>
+              </tr>
+            </thead>
+            <tbody id="deckRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="view-deck" class="view">
+        <div class="section-head deck-head">
+          <div>
+            <span class="mini-label">Deck Detail</span>
+            <h3 id="deckTitle">Deck 详情</h3>
+            <p id="deckMeta">选择一个 deck 查看</p>
+            <p id="deckSource" class="source-path"></p>
+          </div>
+          <div class="artifact-actions" id="artifactActions"></div>
+        </div>
+
+        <div class="deck-layout">
+          <section class="preview">
+            <iframe id="deckFrame" title="Deck preview"></iframe>
+          </section>
+          <section class="side">
+            <div class="tabs">
+              <button class="tab active" data-tab="meta">Metadata</button>
+              <button class="tab" data-tab="md">Markdown</button>
+            </div>
+            <pre id="detailPane"></pre>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

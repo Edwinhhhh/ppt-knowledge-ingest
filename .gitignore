@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Generated knowledge libraries
+ppt-knowledge-library/
+outputs/
+decks/
+catalog.jsonl
+all_chunks.jsonl
+failed.jsonl
+library_manifest.json
+
+# Local scratch
+.venv/
+tmp/

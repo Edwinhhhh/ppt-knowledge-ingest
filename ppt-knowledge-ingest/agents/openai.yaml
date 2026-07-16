@@ -1,0 +1,4 @@
+interface:
+  display_name: "PPT Knowledge Ingest"
+  short_description: "Turn PPTX decks into AI-ready knowledge assets."
+  default_prompt: "Use $ppt-knowledge-ingest to convert this PPTX into Markdown, HTML, JSONL chunks, slide JSON, metadata, and extracted images."
