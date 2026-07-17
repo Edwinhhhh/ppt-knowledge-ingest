@@ -10,6 +10,8 @@ catalog.jsonl
 all_chunks.jsonl
 failed.jsonl
 library_manifest.json
+library_index.sqlite
+library_index.sqlite-*
 
 # Local scratch
 .venv/

@@ -11,6 +11,7 @@ This project packages a Codex Skill plus a local Web UI for converting `.pptx` f
 - `slides.json` for structured slide data
 - `metadata.json` and `manifest.json` for provenance and automation
 - `assets/` for extracted and rendered images
+- `library_index.sqlite` for local full-text search across slide chunks
 
 ## What It Supports
 
@@ -19,7 +20,8 @@ This project packages a Codex Skill plus a local Web UI for converting `.pptx` f
 - Online links that directly download `.pptx`.
 - Feishu/Lark Wiki or Drive links that point to `.pptx` files, when `lark-cli` is installed and authenticated.
 - Visual HTML output via `rendered.html` when a renderer is available.
-- A local desktop-feeling Web UI for scanning, converting, sorting, and previewing outputs.
+- A local desktop-feeling Web UI for scanning, converting, sorting, searching, and previewing outputs.
+- Local full-text search with result positioning back to deck, slide number, source path/URL, and HTML preview.
 
 The Web UI runs locally. It can read local file paths only on the machine where the server is running.
 
@@ -75,6 +77,7 @@ The local UI supports both typed paths and native file pickers:
 - Paste a Feishu/Lark Wiki or Drive file URL that points to a `.pptx`, if `lark-cli` is installed and logged in as a user.
 - Choose an output folder for the generated knowledge library.
 - Watch a live progress bar while files are scanned or converted.
+- Rebuild the local search index and search slide-level chunks without AI token usage.
 
 Online editor links such as WPS or Tencent Docs often return an HTML page or require login. In that case, export the document as `.pptx`/PDF first, or add a platform-specific authorized exporter.
 
@@ -168,6 +171,7 @@ In library mode, the root output also includes:
 - `all_chunks.jsonl`: combined retrieval chunks
 - `failed.jsonl`: files that failed conversion
 - `library_manifest.json`: summary counts and pointers
+- `library_index.sqlite`: local SQLite/FTS index used by the Web UI search panel
 
 ## Notes
 
@@ -176,3 +180,4 @@ In library mode, the root output also includes:
 - SmartArt and OLE objects are detected but not fully parsed.
 - `source_file` and `source_slide` are included in retrieval chunks so AI search results can trace back to the original PPT path and slide number.
 - For online Feishu/Lark imports, `source_url` is also recorded so AI search results can trace back to the original cloud document link.
+- Local search is SQLite-based and does not call an AI model. AI token usage begins only if you add embedding, summarization, OCR, or question-answering on top.

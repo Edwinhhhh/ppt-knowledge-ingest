@@ -272,7 +272,7 @@ h1 {
 
 .module-nav {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   margin-top: 24px;
 }
@@ -592,6 +592,102 @@ input:focus {
 
 .log-panel {
   margin-top: 18px;
+}
+
+.search-panel {
+  margin-bottom: 18px;
+}
+
+.search-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  padding: 20px 24px 24px;
+}
+
+.search-results {
+  display: grid;
+  gap: 12px;
+}
+
+.search-result {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  padding: 18px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 14px 32px rgba(50, 103, 159, 0.11);
+}
+
+.search-result:hover {
+  border-color: rgba(31, 98, 209, 0.34);
+}
+
+.slide-chip {
+  display: grid;
+  place-items: center;
+  min-height: 52px;
+  border-radius: 18px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--blue), var(--violet));
+  font-weight: 900;
+}
+
+.result-body {
+  min-width: 0;
+}
+
+.result-body strong {
+  display: block;
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.result-body p {
+  margin-top: 8px;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.result-body small {
+  display: block;
+  margin-top: 8px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.result-actions button,
+.result-actions a {
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid rgba(61, 123, 190, 0.22);
+  border-radius: 999px;
+  color: var(--blue-deep);
+  background: rgba(255, 255, 255, 0.8);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.empty-state {
+  padding: 24px;
+  border: 1px dashed rgba(61, 123, 190, 0.28);
+  border-radius: 24px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.48);
+  text-align: center;
 }
 
 pre {
@@ -995,7 +1091,8 @@ iframe {
   .action-grid,
   .deck-layout,
   .deck-head,
-  .library-tools {
+  .library-tools,
+  .search-box {
     grid-template-columns: 1fr;
   }
 
@@ -1010,6 +1107,14 @@ iframe {
 
   .preview {
     height: 68vh;
+  }
+
+  .search-result {
+    grid-template-columns: 1fr;
+  }
+
+  .result-actions {
+    justify-content: flex-start;
   }
 }
 

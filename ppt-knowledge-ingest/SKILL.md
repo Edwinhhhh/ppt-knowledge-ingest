@@ -40,6 +40,7 @@ knowledge-library/
   failed.jsonl
   all_chunks.jsonl
   library_manifest.json
+  library_index.sqlite
   decks/
     sha-prefix-deck-slug/
       content.md
@@ -65,6 +66,7 @@ Use this skill when the user wants to:
 - Scan a local hard drive/folder of PPTX files, deduplicate by SHA-256, resume prior work, and produce one combined retrieval file.
 - Run a local desktop-feeling Web UI for scanning, converting, browsing, and reviewing the PPT knowledge library.
 - Import an online `.pptx` URL, including Feishu/Lark Wiki or Drive links that resolve to a `.pptx` file when `lark-cli` is installed and authenticated.
+- Build and query a local full-text search index so users can find slide-level chunks and jump back to the source deck, slide number, and HTML preview.
 
 Do not use this skill to create a new presentation or visually redesign slides. For visual slide generation/editing, use the presentation-focused skills instead.
 
@@ -95,6 +97,8 @@ http://127.0.0.1:8787/
 The Web UI is a local-only tool. It reads local PPTX files, runs the bundled conversion script, and serves generated artifacts from the output folder.
 
 The Web UI also supports an online-link mode. Direct `.pptx` download links are fetched over HTTP. Feishu/Lark Wiki or Drive links are resolved with `lark-cli drive +inspect` and downloaded with `lark-cli drive +download`; the original cloud URL is written as `source_url` in metadata, catalog rows, and retrieval chunks.
+
+The Web UI can rebuild `library_index.sqlite` from `catalog.jsonl` and per-deck `chunks.jsonl`. The search panel is local SQLite full-text search; it does not call an AI model and does not consume AI tokens.
 
 For batch conversion:
 
@@ -240,6 +244,7 @@ Core meanings:
 - `failed.jsonl`: library-mode conversion failures that did not stop the whole run.
 - `all_chunks.jsonl`: library-mode combined retrieval chunks across all unique processed decks, preserving original PPTX path and slide number on each line.
 - `library_manifest.json`: library-mode summary counts and pointers.
+- `library_index.sqlite`: local SQLite/FTS index used by the Web UI to search chunks and locate results.
 
 ## Current Limits
 

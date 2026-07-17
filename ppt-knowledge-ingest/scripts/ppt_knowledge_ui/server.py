@@ -7,6 +7,7 @@ import mimetypes
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -343,6 +344,10 @@ def refresh_library_index(output_root: Path) -> dict[str, Any]:
         "all_chunks": str(output_root / "all_chunks.jsonl"),
     }
     (output_root / "library_manifest.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        build_search_index(output_root, rows)
+    except Exception as exc:
+        summary["search_index_error"] = str(exc)
     return summary
 
 
@@ -352,6 +357,290 @@ def upsert_catalog_row(output_root: Path, row: dict[str, Any]) -> None:
     rows.append(row)
     write_jsonl(catalog_path, rows)
     refresh_library_index(output_root)
+
+
+def compact_json(value: Any) -> str:
+    if not value:
+        return ""
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def chunk_search_body(chunk: dict[str, Any]) -> str:
+    parts = [
+        str(chunk.get("title") or ""),
+        str(chunk.get("text") or ""),
+        compact_json(chunk.get("layout_groups")),
+        compact_json(chunk.get("charts")),
+        compact_json(chunk.get("tags")),
+    ]
+    return "\n".join(part for part in parts if part)
+
+
+def search_index_path(output_root: Path) -> Path:
+    return output_root / "library_index.sqlite"
+
+
+def create_fts_table(conn: sqlite3.Connection) -> str:
+    for tokenizer in ("trigram", "unicode61"):
+        try:
+            conn.execute(
+                f"""
+                CREATE VIRTUAL TABLE chunk_fts USING fts5(
+                    title,
+                    body,
+                    deck_title,
+                    source_file,
+                    tokenize='{tokenizer}'
+                )
+                """
+            )
+            return tokenizer
+        except sqlite3.OperationalError:
+            continue
+    raise RuntimeError("当前 Python SQLite 不支持 FTS5，无法创建全文索引。")
+
+
+def build_search_index(output_root: Path, catalog_rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    output_root = output_root.resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    rows = catalog_rows if catalog_rows is not None else jsonl(output_root / "catalog.jsonl")
+    db_path = search_index_path(output_root)
+    if db_path.exists():
+        db_path.unlink()
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute(
+            """
+            CREATE TABLE decks (
+                deck_dir TEXT PRIMARY KEY,
+                title TEXT,
+                filename TEXT,
+                source_file TEXT,
+                source_url TEXT,
+                sha256 TEXT,
+                status TEXT,
+                slide_count INTEGER,
+                imported_at TEXT,
+                has_rendered_html INTEGER
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE chunks (
+                id TEXT,
+                deck_dir TEXT,
+                deck_title TEXT,
+                slide_no INTEGER,
+                title TEXT,
+                body TEXT,
+                source_file TEXT,
+                source_url TEXT,
+                source_sha256 TEXT,
+                html_path TEXT,
+                rendered_html_path TEXT,
+                markdown_path TEXT,
+                chunk_json TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX idx_chunks_deck_slide ON chunks(deck_dir, slide_no)")
+        tokenizer = create_fts_table(conn)
+
+        deck_count = 0
+        chunk_count = 0
+        seen_dirs: set[Path] = set()
+        for row in rows:
+            deck_dir_raw = row.get("output_dir")
+            if row.get("status") not in {"processed", "skipped_existing", "duplicate"} or not deck_dir_raw:
+                continue
+            deck_dir = Path(deck_dir_raw).resolve()
+            if deck_dir in seen_dirs or not deck_dir.exists():
+                continue
+            seen_dirs.add(deck_dir)
+            metadata = read_json(deck_dir / "metadata.json")
+            manifest = read_json(deck_dir / "manifest.json")
+            chunks_path = deck_dir / "chunks.jsonl"
+            source_url = metadata.get("source_url") or row.get("source_url")
+            source_file = source_url or metadata.get("source_file") or row.get("path") or ""
+            deck_title = metadata.get("title") or row.get("title") or row.get("filename") or deck_dir.name
+            imported_at = metadata.get("generated_at") or row.get("updated_at") or row.get("modified_at")
+            conn.execute(
+                """
+                INSERT INTO decks (
+                    deck_dir, title, filename, source_file, source_url, sha256, status,
+                    slide_count, imported_at, has_rendered_html
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(deck_dir),
+                    deck_title,
+                    row.get("filename"),
+                    source_file,
+                    source_url,
+                    metadata.get("sha256") or row.get("sha256"),
+                    row.get("status"),
+                    metadata.get("slide_count") or row.get("slide_count"),
+                    imported_at,
+                    1 if (deck_dir / "rendered.html").exists() else 0,
+                ),
+            )
+            deck_count += 1
+            if not chunks_path.exists():
+                continue
+            for chunk in jsonl(chunks_path):
+                body = chunk_search_body(chunk)
+                title = str(chunk.get("title") or "")
+                slide_no = chunk.get("slide_no") or chunk.get("source_slide")
+                chunk_source_file = chunk.get("source_file") or source_file
+                chunk_source_url = chunk.get("source_url") or source_url
+                conn.execute(
+                    """
+                    INSERT INTO chunks (
+                        id, deck_dir, deck_title, slide_no, title, body, source_file,
+                        source_url, source_sha256, html_path, rendered_html_path,
+                        markdown_path, chunk_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        chunk.get("id") or f"{deck_title}#slide-{slide_no}",
+                        str(deck_dir),
+                        deck_title,
+                        int(slide_no) if isinstance(slide_no, int) or str(slide_no).isdigit() else None,
+                        title,
+                        body,
+                        chunk_source_file,
+                        chunk_source_url,
+                        chunk.get("source_sha256") or metadata.get("sha256") or row.get("sha256"),
+                        str(deck_dir / manifest.get("html", "content.html")) if manifest.get("html") else "",
+                        str(deck_dir / manifest.get("rendered_html", "rendered.html")) if manifest.get("rendered_html") else "",
+                        str(deck_dir / manifest.get("content", "content.md")) if manifest.get("content") else "",
+                        json.dumps(chunk, ensure_ascii=False),
+                    ),
+                )
+                rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                conn.execute(
+                    "INSERT INTO chunk_fts(rowid, title, body, deck_title, source_file) VALUES (?, ?, ?, ?, ?)",
+                    (rowid, title, body, deck_title, chunk_source_file),
+                )
+                chunk_count += 1
+        conn.execute(
+            """
+            CREATE TABLE index_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
+        meta = {
+            "output_root": str(output_root),
+            "tokenizer": tokenizer,
+            "deck_count": deck_count,
+            "chunk_count": chunk_count,
+            "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        conn.executemany("INSERT INTO index_meta(key, value) VALUES (?, ?)", meta.items())
+        conn.commit()
+        return meta
+    finally:
+        conn.close()
+
+
+def quote_fts_query(query: str) -> str:
+    cleaned = " ".join(query.strip().split())
+    return f'"{cleaned.replace(chr(34), chr(34) + chr(34))}"'
+
+
+def snippet_text(text: str, query: str, radius: int = 72) -> str:
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if not text:
+        return ""
+    lower_text = text.lower()
+    lower_query = query.lower()
+    pos = lower_text.find(lower_query) if lower_query else -1
+    if pos < 0:
+        return text[: radius * 2] + ("..." if len(text) > radius * 2 else "")
+    start = max(0, pos - radius)
+    end = min(len(text), pos + len(query) + radius)
+    prefix = "..." if start else ""
+    suffix = "..." if end < len(text) else ""
+    return prefix + text[start:end] + suffix
+
+
+def search_library(output_root: Path, query: str, limit: int = 30) -> dict[str, Any]:
+    output_root = output_root.resolve()
+    query = query.strip()
+    limit = max(1, min(int(limit or 30), 100))
+    db_path = search_index_path(output_root)
+    if not db_path.exists():
+        build_search_index(output_root)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        meta = {row["key"]: row["value"] for row in conn.execute("SELECT key, value FROM index_meta")}
+        if not query:
+            return {"query": query, "index": meta, "results": []}
+        results: list[dict[str, Any]] = []
+        try:
+            rows = conn.execute(
+                """
+                SELECT c.*, bm25(chunk_fts) AS score
+                FROM chunk_fts
+                JOIN chunks c ON c.rowid = chunk_fts.rowid
+                WHERE chunk_fts MATCH ?
+                ORDER BY score
+                LIMIT ?
+                """,
+                (quote_fts_query(query), limit),
+            ).fetchall()
+        except sqlite3.Error:
+            like = f"%{query}%"
+            rows = conn.execute(
+                """
+                SELECT c.*, 0.0 AS score
+                FROM chunks c
+                WHERE c.title LIKE ? OR c.body LIKE ? OR c.deck_title LIKE ? OR c.source_file LIKE ?
+                ORDER BY c.deck_title, c.slide_no
+                LIMIT ?
+                """,
+                (like, like, like, like, limit),
+            ).fetchall()
+        if not rows:
+            like = f"%{query}%"
+            rows = conn.execute(
+                """
+                SELECT c.*, 0.0 AS score
+                FROM chunks c
+                WHERE c.title LIKE ? OR c.body LIKE ? OR c.deck_title LIKE ? OR c.source_file LIKE ?
+                ORDER BY c.deck_title, c.slide_no
+                LIMIT ?
+                """,
+                (like, like, like, like, limit),
+            ).fetchall()
+        for row in rows:
+            body = row["body"] or ""
+            results.append(
+                {
+                    "id": row["id"],
+                    "deck_dir": row["deck_dir"],
+                    "deck_title": row["deck_title"],
+                    "slide_no": row["slide_no"],
+                    "title": row["title"],
+                    "snippet": snippet_text(body, query),
+                    "source_file": row["source_file"],
+                    "source_url": row["source_url"],
+                    "source_sha256": row["source_sha256"],
+                    "html_url": local_file_url(Path(row["html_path"])) if row["html_path"] and Path(row["html_path"]).exists() else "",
+                    "rendered_html_url": local_file_url(Path(row["rendered_html_path"])) if row["rendered_html_path"] and Path(row["rendered_html_path"]).exists() else "",
+                    "markdown_url": local_file_url(Path(row["markdown_path"])) if row["markdown_path"] and Path(row["markdown_path"]).exists() else "",
+                    "score": row["score"],
+                }
+            )
+        return {"query": query, "index": meta, "results": results}
+    finally:
+        conn.close()
 
 
 def progress_from_event(event: dict[str, Any]) -> dict[str, Any]:
@@ -541,6 +830,10 @@ def run_task(task_id: str, cmd: list[str], output_root: Path) -> None:
     task["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
     if task["status"] == "done":
         task["progress"] = {**task.get("progress", {}), "percent": 100, "status": "done"}
+        try:
+            build_search_index(output_root)
+        except Exception as exc:
+            task["stderr"] = (task.get("stderr") or "") + f"\nSearch index update failed: {exc}"
     task["library"] = load_library(output_root)
 
 
@@ -627,6 +920,16 @@ def load_library(output_root: Path) -> dict[str, Any]:
     manifest = read_json(output_root / "library_manifest.json")
     catalog = jsonl(output_root / "catalog.jsonl")
     failed = jsonl(output_root / "failed.jsonl")
+    index_meta: dict[str, Any] = {}
+    db_path = search_index_path(output_root)
+    if db_path.exists():
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            index_meta = {row["key"]: row["value"] for row in conn.execute("SELECT key, value FROM index_meta")}
+            conn.close()
+        except Exception:
+            index_meta = {}
     decks = []
     for row in catalog:
         out = row.get("output_dir")
@@ -664,6 +967,7 @@ def load_library(output_root: Path) -> dict[str, Any]:
     return {
         "output_root": str(output_root),
         "manifest": manifest,
+        "search_index": index_meta,
         "catalog": catalog,
         "failed": failed,
         "decks": decks,
@@ -725,6 +1029,11 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/library":
             output_root = safe_path(qs.get("output_root", [str(DEFAULT_OUTPUT_ROOT)])[0])
             self.send_json(load_library(output_root))
+        elif parsed.path == "/api/search":
+            output_root = safe_path(qs.get("output_root", [str(DEFAULT_OUTPUT_ROOT)])[0])
+            query = qs.get("q", [""])[0]
+            limit = int(qs.get("limit", ["30"])[0])
+            self.send_json(search_library(output_root, query, limit))
         elif parsed.path == "/api/deck":
             deck_dir = safe_path(qs.get("deck_dir", [""])[0])
             self.send_json(deck_detail(deck_dir))
@@ -752,6 +1061,12 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/browse":
             try:
                 self.send_json(choose_path(self.read_body().get("kind", "")))
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, 400)
+        elif parsed.path == "/api/reindex":
+            try:
+                output_root = safe_path(self.read_body().get("output_root") or str(DEFAULT_OUTPUT_ROOT))
+                self.send_json(build_search_index(output_root))
             except Exception as exc:
                 self.send_json({"error": str(exc)}, 400)
         else:

@@ -50,8 +50,13 @@
         <strong>知识库</strong>
         <small>查看状态、资产、失败队列</small>
       </button>
-      <button class="nav" data-view="deck">
+      <button class="nav" data-view="search">
         <span>03</span>
+        <strong>全文检索</strong>
+        <small>搜索 chunks，定位来源页</small>
+      </button>
+      <button class="nav" data-view="deck">
+        <span>04</span>
         <strong>Deck 详情</strong>
         <small>预览原版式 HTML 与结构化结果</small>
       </button>
@@ -217,6 +222,33 @@
             </thead>
             <tbody id="deckRows"></tbody>
           </table>
+        </div>
+      </section>
+
+      <section id="view-search" class="view">
+        <div class="section-head">
+          <span class="mini-label">Local Search</span>
+          <h3>在本地索引里检索每一页 PPT 内容。</h3>
+          <p id="searchIndexSummary">索引尚未加载</p>
+        </div>
+
+        <section class="glass-panel search-panel">
+          <div class="panel-title compact">
+            <span>01</span>
+            <div>
+              <h4>全文搜索</h4>
+              <p>基于 `chunks.jsonl` 建立 SQLite 索引，不调用 AI，不消耗 token。</p>
+            </div>
+          </div>
+          <div class="search-box">
+            <input id="fullTextSearch" placeholder="输入关键词，例如：销售高管、AI Native、安全策略" spellcheck="false">
+            <button id="runSearchBtn" class="primary">搜索</button>
+            <button id="reindexBtn" class="secondary">重建索引</button>
+          </div>
+        </section>
+
+        <div class="search-results" id="searchResults">
+          <div class="empty-state">输入关键词后，命中的 deck、页码和摘要会显示在这里。</div>
         </div>
       </section>
 

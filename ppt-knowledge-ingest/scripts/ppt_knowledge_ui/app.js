@@ -113,12 +113,16 @@ async function refreshLibrary() {
 
 function renderLibrary(lib) {
   const m = lib.manifest || {};
+  const index = lib.search_index || {};
   const decks = lib.decks || [];
   const total = m.pptx_count || lib.catalog.length || decks.length || 0;
   const rendered = m.visual_rendered_count ?? decks.filter((d) => d.has_rendered_html).length;
   const failed = m.failed_count ?? (lib.failed || []).length ?? 0;
   const chunks = m.all_chunks_count || 0;
   $("librarySummary").textContent = `${total} files · ${m.processed_count || 0} processed · ${m.skipped_existing_count || 0} skipped · ${m.duplicate_count || 0} duplicate · ${failed} failed`;
+  $("searchIndexSummary").textContent = index.built_at
+    ? `${index.deck_count || 0} decks · ${index.chunk_count || 0} chunks · tokenizer ${index.tokenizer || "-"} · ${formatDateTime(index.built_at)}`
+    : "索引尚未建立，点击“重建索引”或完成一次转换后会自动生成。";
   $("statsGrid").innerHTML = [
     ["Total", total, "PPT files"],
     ["Rendered", rendered, "visual HTML"],
@@ -239,6 +243,18 @@ function formatTime(value) {
   return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
 }
 
+function formatDateTime(value) {
+  const date = parseDate(value);
+  if (!date) return "-";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
 function parseDate(value) {
   const time = Date.parse(value || "");
   return Number.isFinite(time) ? new Date(time) : null;
@@ -257,6 +273,10 @@ function statusLabel(status) {
 
 async function loadDeck(deckDir) {
   const detail = await api(`/api/deck?deck_dir=${encodeURIComponent(deckDir)}`);
+  return showDeck(detail);
+}
+
+function showDeck(detail, preferredUrl = "") {
   currentDeck = detail;
   const metadata = detail.metadata || {};
   $("deckTitle").textContent = metadata.title || "Deck";
@@ -266,9 +286,10 @@ async function loadDeck(deckDir) {
   $("deckSource").title = metadata.source_file || "";
   renderArtifactActions(detail.links || {});
   const links = detail.links || {};
-  $("deckFrame").src = links.rendered_html || links.html || links.standalone_html || "about:blank";
+  $("deckFrame").src = preferredUrl || links.rendered_html || links.html || links.standalone_html || "about:blank";
   renderDetail();
   switchView("deck");
+  return detail;
 }
 
 function renderArtifactActions(links = {}) {
@@ -321,6 +342,72 @@ function renderDetail() {
   }
 }
 
+async function rebuildSearchIndex() {
+  $("searchIndexSummary").textContent = "正在重建本地索引...";
+  const result = await api("/api/reindex", {
+    method: "POST",
+    body: JSON.stringify({ output_root: $("outputRoot").value.trim() }),
+  });
+  $("searchIndexSummary").textContent = `${result.deck_count || 0} decks · ${result.chunk_count || 0} chunks · tokenizer ${result.tokenizer || "-"} · ${formatDateTime(result.built_at)}`;
+  await refreshLibrary();
+  switchView("search");
+}
+
+async function runFullTextSearch() {
+  const q = $("fullTextSearch").value.trim();
+  if (!q) {
+    $("searchResults").innerHTML = `<div class="empty-state">先输入一个关键词，比如“销售高管”或“安全策略”。</div>`;
+    return;
+  }
+  $("searchResults").innerHTML = `<div class="empty-state">正在搜索：${escapeHtml(q)}</div>`;
+  const out = encodeURIComponent($("outputRoot").value.trim());
+  const result = await api(`/api/search?output_root=${out}&q=${encodeURIComponent(q)}&limit=50`);
+  renderSearchResults(result);
+}
+
+function renderSearchResults(result) {
+  const rows = result.results || [];
+  const index = result.index || {};
+  $("searchIndexSummary").textContent = index.built_at
+    ? `${index.deck_count || 0} decks · ${index.chunk_count || 0} chunks · tokenizer ${index.tokenizer || "-"} · 命中 ${rows.length} 条`
+    : `命中 ${rows.length} 条`;
+  if (!rows.length) {
+    $("searchResults").innerHTML = `<div class="empty-state">没有找到“${escapeHtml(result.query || "")}”。可以换一个词，或先重建索引。</div>`;
+    return;
+  }
+  $("searchResults").innerHTML = rows.map((row, idx) => {
+    const openUrl = row.rendered_html_url || row.html_url || "";
+    return `
+      <article class="search-result" data-deck-dir="${escapeHtml(row.deck_dir)}" data-open-url="${escapeHtml(openUrl)}">
+        <div class="slide-chip">P${escapeHtml(String(row.slide_no || "-"))}</div>
+        <div class="result-body">
+          <strong>${escapeHtml(row.deck_title || "Deck")} · ${escapeHtml(row.title || "Untitled")}</strong>
+          <p>${escapeHtml(row.snippet || "")}</p>
+          <small>${escapeHtml(row.source_url || row.source_file || "")}</small>
+        </div>
+        <div class="result-actions">
+          <button type="button" data-action="open-deck" data-index="${idx}">定位</button>
+          ${openUrl ? `<a href="${escapeHtml(openUrl)}" target="_blank" rel="noreferrer">HTML</a>` : ""}
+        </div>
+      </article>
+    `;
+  }).join("");
+  document.querySelectorAll("[data-action='open-deck']").forEach((btn) => {
+    btn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const card = btn.closest(".search-result");
+      const detail = await api(`/api/deck?deck_dir=${encodeURIComponent(card.dataset.deckDir)}`);
+      showDeck(detail, card.dataset.openUrl || "");
+    });
+  });
+  document.querySelectorAll(".search-result").forEach((card) => {
+    card.addEventListener("click", async () => {
+      const detail = await api(`/api/deck?deck_dir=${encodeURIComponent(card.dataset.deckDir)}`);
+      showDeck(detail, card.dataset.openUrl || "");
+    });
+  });
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
 }
@@ -337,6 +424,19 @@ $("scanBtnSecondary").addEventListener("click", () => start("scan").catch((e) =>
 $("convertBtn").addEventListener("click", () => start("convert").catch((e) => log(e.message)));
 $("convertBtnSecondary").addEventListener("click", () => start("convert").catch((e) => log(e.message)));
 $("refreshBtn").addEventListener("click", () => refreshLibrary().catch((e) => log(e.message)));
+$("runSearchBtn").addEventListener("click", () => runFullTextSearch().catch((e) => {
+  $("searchResults").innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
+}));
+$("reindexBtn").addEventListener("click", () => rebuildSearchIndex().catch((e) => {
+  $("searchIndexSummary").textContent = e.message;
+}));
+$("fullTextSearch").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    runFullTextSearch().catch((e) => {
+      $("searchResults").innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
+    });
+  }
+});
 $("browseSourceBtn").addEventListener("click", () => browse(sourceType === "file" ? "source_file" : "source_folder").catch((e) => log(e.message)));
 $("browseOutputBtn").addEventListener("click", () => browse("output_folder").catch((e) => log(e.message)));
 $("search").addEventListener("input", renderRows);
